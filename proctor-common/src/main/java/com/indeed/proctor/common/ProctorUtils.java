@@ -1107,11 +1107,14 @@ public abstract class ProctorUtils {
             definedBuckets.add(bucket.getValue());
         }
 
+        final StringBuilder allAllocationsError = new StringBuilder();
         for (int i = 0; i < allocations.size(); i++) {
             final Allocation allocation = allocations.get(i);
+            final StringBuilder allocationError =  new StringBuilder();
             final List<Range> ranges = allocation.getRanges();
             if ((ranges == null) || ranges.isEmpty()) {
-                throw new IncompatibleTestMatrixException("Allocation range has no buckets, needs to add up to 1.");
+                allocationError.append("Allocation range has no buckets, needs to add up to 1.");
+                continue;
             }
             //  ensure that each range refers to a known bucket
             double bucketTotal = 0;
@@ -1119,29 +1122,25 @@ public abstract class ProctorUtils {
                 bucketTotal += range.getLength();
                 // Internally consistent
                 if (!definedBuckets.contains(range.getBucketValue())) {
-                    throw new IncompatibleTestMatrixException(
-                            "Allocation range in " + testName + " from " + matrixSource
-                                    + " refers to unknown bucket value " + range.getBucketValue()
-                    );
+                    allocationError.append("Allocation range in " + testName + " from " + matrixSource
+                            + " refers to unknown bucket value " + range.getBucketValue());
                 }
             }
             //  I hate floating points.  TODO: extract a required precision constant/parameter?
             //  compensate for FP imprecision.  TODO: determine what these bounds really should be by testing stuff
             if (bucketTotal < 0.9999 || bucketTotal > 1.0001) {
-                throw new IncompatibleTestMatrixException(
-                        testName + " range with rule " + allocation.getRule() + " does not add up to 1 : "
-                                + ranges.stream().map(r -> Double.toString(r.getLength())).collect(joining(" + "))
-                                + " = " + bucketTotal
-                );
+                allocationError.append(testName + " range with rule " + allocation.getRule() + " does not add up to 1 : "
+                        + ranges.stream().map(r -> Double.toString(r.getLength())).collect(joining(" + "))
+                        + " = " + bucketTotal);
+                continue;
             }
             final String rule = allocation.getRule();
             final boolean lastAllocation = i == (allocations.size() - 1);
             final String bareRule = removeElExpressionBraces(rule);
             if (!lastAllocation && StringUtils.isBlank(bareRule)) {
-                throw new IncompatibleTestMatrixException(
-                        "Allocation[" + i + "] for test " + testName + " from " + matrixSource + " has empty rule: "
-                                + allocation.getRule()
-                );
+                allocationError.append("Allocation[" + i + "] for test " + testName + " from " + matrixSource + " has empty rule: "
+                        + allocation.getRule());
+                continue;
             }
 
             try {
@@ -1152,10 +1151,16 @@ public abstract class ProctorUtils {
                         providedContext.getUninstantiatedIdentifiers()
                 );
             } catch (final InvalidRuleException e) {
-                throw new IncompatibleTestMatrixException(
-                        String.format("Invalid allocation rule in %s: %s", testName, e.getMessage()), e);
+                allocationError.append(String.format("Invalid allocation rule in %s: %s", testName, e.getMessage()));
             }
 
+            if(allocationError.length() > 0) {
+                allAllocationsError.append("Allocation ID: " + allocation.getId() + " has errors: ")
+                        .append(allocationError).append("\n");
+            }
+        }
+        if(allAllocationsError.length() > 0){
+            throw new IncompatibleTestMatrixException(allAllocationsError.toString());
         }
 
         /*
